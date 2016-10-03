@@ -1,0 +1,8 @@
+[package]
+name = "webserver"
+version = "0.1.0"
+authors = ["Sylvain M <syml@users.noreply.github.com>"]
+
+[dependencies]
+mio = "0.6"
+threadpool = { path = "/Users/sylvainm/dev/rustdev/threadpool" }
