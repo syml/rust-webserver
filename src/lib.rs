@@ -96,7 +96,18 @@ impl WebServer {
                         match clients.get_mut(id) {
                             None => panic!("client no {} can't be found in clients map!", id),
                             Some(ref mut client) => {
-                                client.process();
+                                match client.read() {
+                                    None => {}
+                                    Some(r) => {
+                                        let mut resp = http::Response::new();
+                                        resp.set_status(http::Status::ok());
+                                        resp.set_header("Content-Type", "text/html");
+                                        resp.set_body(&format!("<h1>Sylvain Server</h1>You \
+                                                               requested: {}",
+                                                               r.uri));
+                                        client.write(resp);
+                                    }
+                                }
                             }
                         }
                     }
