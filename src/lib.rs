@@ -1,73 +1,50 @@
 extern crate threadpool;
 extern crate mio;
+extern crate regex;
 
-mod http;
+pub mod http;
 
 use std::io::prelude::*;
-use std::thread;
-use std::thread::JoinHandle;
 use threadpool::ThreadPool;
-use std::sync::mpsc::*;
 use mio::*;
 use mio::tcp::*;
 use std::collections::HashMap;
+use regex::Regex;
+use http::{Request, Response, Status, Connection};
 
 const SERVER: Token = Token(0);
 
-enum Msg {
-    Stop,
-}
-
-struct Context {
-    host: String,
-    channel: Receiver<Msg>,
-}
+type Handler = Box<Fn(Request) -> Response>;
 
 pub struct WebServer {
-    server_thread: JoinHandle<()>,
-    channel: Sender<Msg>,
+    host: String,
+    handlers: Vec<(Regex, Handler)>,
 }
 
 impl WebServer {
     pub fn new(host: &str) -> WebServer {
-        let (tx, rx) = channel();
-        let context = Context {
-            host: host.to_string(),
-            channel: rx,
-        };
-        let server_thread = thread::spawn(move || Self::server_main(context));
         return WebServer {
-            server_thread: server_thread,
-            channel: tx,
+            host: host.to_string(),
+            handlers: Vec::new(),
         };
     }
 
-    pub fn stop(self) {
-        self.channel.send(Msg::Stop);
-        self.server_thread.join();
+    pub fn add_handler<T>(&mut self, pattern: &str, handler: T)
+        where T: Fn(Request) -> Response + 'static
+    {
+        self.handlers.push((Regex::new(&format!("^{}$", pattern)).unwrap(),
+                            Box::new(handler)));
     }
 
-    pub fn join(self) {
-        self.server_thread.join();
-    }
-
-    fn server_main(context: Context) {
+    pub fn run(self) {
         let mut poll = Poll::new().unwrap();
-        let addr = context.host.parse().unwrap();
+        let addr = self.host.parse().unwrap();
         let server = TcpListener::bind(&addr).unwrap();
         poll.register(&server, SERVER, Ready::readable(), PollOpt::edge()).unwrap();
         let mut events = Events::with_capacity(1024);
-        let mut clients: HashMap<usize, http::Connection> = HashMap::new();
+        let mut clients: HashMap<usize, Connection> = HashMap::new();
         let mut next_client: usize = 1;
         loop {
-            let msg = context.channel.try_recv();
-            match msg {
-                Ok(Msg::Stop) => break,
-                Err(TryRecvError::Disconnected) => {
-                    panic!("server_main thread disconnected from main thread!");
-                }
-                _ => {}
-            }
             let poll_error = poll.poll(&mut events, None);
             match poll_error {
                 Err(e) => panic!("Error during poll(): {}", e),
@@ -86,7 +63,7 @@ impl WebServer {
                                     Err(e) => panic!("Error during register(): {}", e),
                                     _ => {}
                                 }
-                                clients.insert(next_client, http::Connection::new(stream));
+                                clients.insert(next_client, Connection::new(stream));
                                 next_client += 1;
                             }
                             Err(e) => panic!("Error during accept() : {}", e),
@@ -99,13 +76,14 @@ impl WebServer {
                                 match client.read() {
                                     None => {}
                                     Some(r) => {
-                                        let mut resp = http::Response::new();
-                                        resp.set_status(http::Status::ok());
-                                        resp.set_header("Content-Type", "text/html");
-                                        resp.set_body(&format!("<h1>Sylvain Server</h1>You \
-                                                               requested: {}",
-                                                               r.uri));
-                                        client.write(resp);
+                                        for &(ref regex, ref handler) in &self.handlers {
+                                            if regex.is_match(&r.uri) {
+                                                let resp = handler(r);
+                                                client.write(resp);
+                                                break;
+                                            }
+                                        }
+                                        client.write(Response::not_found());
                                     }
                                 }
                             }

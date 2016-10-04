@@ -18,6 +18,12 @@ impl Status {
             desc: "OK".to_string(),
         };
     }
+    pub fn not_found() -> Status {
+        return Status {
+            code: 404,
+            desc: "Not Found".to_string(),
+        };
+    }
 }
 
 pub struct Response {
@@ -35,6 +41,14 @@ impl Response {
             headers: HashMap::new(),
             body: Vec::new(),
         };
+    }
+
+    pub fn not_found() -> Response {
+        let mut r = Response::new();
+        r.set_status(Status::not_found());
+        r.set_header("Content-Type", "text/html");
+        r.set_body("<html><h1>404 Not found</h1></html>");
+        return r;
     }
 
     pub fn set_status(&mut self, status: Status) {
@@ -66,7 +80,6 @@ impl Response {
         }
         b.extend_from_slice("\r\n".as_bytes());
         b.extend_from_slice(self.body.as_slice());
-        b.extend_from_slice("\r\n".as_bytes());
         return b;
     }
 }
@@ -77,7 +90,7 @@ enum Method {
 }
 
 #[derive(Debug, Clone)]
-struct Request {
+pub struct Request {
     version: String,
     headers: HashMap<String, String>,
     body: Vec<u8>,
