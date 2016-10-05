@@ -12,43 +12,51 @@ use std::collections::HashMap;
 use regex::Regex;
 use http::{Request, Response, Status, Connection};
 use std::sync::mpsc::*;
+use std::thread;
 
 const SERVER: Token = Token(0);
 
-type HandlerFn = Box<Fn(Request) -> Response>;
-type Handler = (Regex, HandlerFn);
+pub trait Handler : Send + 'static {
+    fn process(&mut self, r: Request) -> Response;
+    fn duplicate(&self) -> Box<Handler>;
+}
 
+type HandlerRule = (Regex, Box<Handler>);
+
+#[derive(Debug)]
 enum Msg {
-    NewClient((usize, TcpStream)),
+    NewClient(usize, TcpStream),
     ClientReady(usize),
 }
 
 pub struct WebServer {
     host: String,
-    handlers: Vec<Handler>,
+    handlers: Vec<HandlerRule>,
+    num_workers: usize,
 }
 
 impl WebServer {
-    pub fn new(host: &str) -> WebServer {
+    pub fn new(host: &str, num_workers: usize) -> WebServer {
         return WebServer {
             host: host.to_string(),
             handlers: Vec::new(),
+            num_workers: num_workers,
         };
     }
 
     pub fn add_handler<T>(&mut self, pattern: &str, handler: T)
-        where T: Fn(Request) -> Response + 'static
+        where T: Handler
     {
         self.handlers.push((Regex::new(&format!("^{}$", pattern)).unwrap(),
                             Box::new(handler)));
     }
 
-    fn process_clients(channel: Receiver<Msg>, handlers: Vec<Handler>) {
+    fn process_clients(channel: Receiver<Msg>, mut handlers: Vec<HandlerRule>) {
         let mut clients: HashMap<usize, Connection> = HashMap::new();
         loop {
             let msg = channel.recv().unwrap();
             match msg {
-                Msg::NewClient((id, client)) => {
+                Msg::NewClient(id, client) => {
                     clients.insert(id, Connection::new(client));
                 }
                 Msg::ClientReady(id) => {
@@ -58,9 +66,9 @@ impl WebServer {
                             match client.read() {
                                 None => {}
                                 Some(r) => {
-                                    for &(ref regex, ref handler) in &handlers {
+                                    for &mut (ref regex, ref mut handler) in &mut handlers {
                                         if regex.is_match(&r.uri) {
-                                            let resp = handler(r);
+                                            let resp = handler.process(r);
                                             client.write(resp);
                                             break;
                                         }
@@ -81,8 +89,20 @@ impl WebServer {
         let server = TcpListener::bind(&addr).unwrap();
         poll.register(&server, SERVER, Ready::readable(), PollOpt::edge()).unwrap();
         let mut events = Events::with_capacity(1024);
-        let mut clients: HashMap<usize, Connection> = HashMap::new();
         let mut next_client: usize = 1;
+        let mut workers = Vec::new();
+        // Create worker threads.
+        for i in 0..self.num_workers {
+            let (tx, rx) = channel();
+            let mut handlers = Vec::new();
+            for &(ref r, ref h) in &self.handlers {
+                handlers.push((r.clone(), h.duplicate()));
+            }
+            let worker = thread::spawn(move || {
+                Self::process_clients(rx, handlers);
+            });
+            workers.push(tx);
+        }
         loop {
             let poll_error = poll.poll(&mut events, None);
             match poll_error {
@@ -102,31 +122,15 @@ impl WebServer {
                                     Err(e) => panic!("Error during register(): {}", e),
                                     _ => {}
                                 }
-                                clients.insert(next_client, Connection::new(stream));
+                                workers[next_client % self.num_workers]
+                                    .send(Msg::NewClient(next_client, stream));
                                 next_client += 1;
                             }
                             Err(e) => panic!("Error during accept() : {}", e),
                         }
                     }
-                    Token(ref id) => {
-                        match clients.get_mut(id) {
-                            None => panic!("client no {} can't be found in clients map!", id),
-                            Some(ref mut client) => {
-                                match client.read() {
-                                    None => {}
-                                    Some(r) => {
-                                        for &(ref regex, ref handler) in &self.handlers {
-                                            if regex.is_match(&r.uri) {
-                                                let resp = handler(r);
-                                                client.write(resp);
-                                                break;
-                                            }
-                                        }
-                                        client.write(Response::not_found());
-                                    }
-                                }
-                            }
-                        }
+                    Token(id) => {
+                        workers[id % self.num_workers].send(Msg::ClientReady(id));
                     }
                 }
             }
