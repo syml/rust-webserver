@@ -11,14 +11,21 @@ use mio::tcp::*;
 use std::collections::HashMap;
 use regex::Regex;
 use http::{Request, Response, Status, Connection};
+use std::sync::mpsc::*;
 
 const SERVER: Token = Token(0);
 
-type Handler = Box<Fn(Request) -> Response>;
+type HandlerFn = Box<Fn(Request) -> Response>;
+type Handler = (Regex, HandlerFn);
+
+enum Msg {
+    NewClient((usize, TcpStream)),
+    ClientReady(usize),
+}
 
 pub struct WebServer {
     host: String,
-    handlers: Vec<(Regex, Handler)>,
+    handlers: Vec<Handler>,
 }
 
 impl WebServer {
@@ -34,6 +41,38 @@ impl WebServer {
     {
         self.handlers.push((Regex::new(&format!("^{}$", pattern)).unwrap(),
                             Box::new(handler)));
+    }
+
+    fn process_clients(channel: Receiver<Msg>, handlers: Vec<Handler>) {
+        let mut clients: HashMap<usize, Connection> = HashMap::new();
+        loop {
+            let msg = channel.recv().unwrap();
+            match msg {
+                Msg::NewClient((id, client)) => {
+                    clients.insert(id, Connection::new(client));
+                }
+                Msg::ClientReady(id) => {
+                    match clients.get_mut(&id) {
+                        None => panic!("client no {} can't be found in clients map!", id),
+                        Some(ref mut client) => {
+                            match client.read() {
+                                None => {}
+                                Some(r) => {
+                                    for &(ref regex, ref handler) in &handlers {
+                                        if regex.is_match(&r.uri) {
+                                            let resp = handler(r);
+                                            client.write(resp);
+                                            break;
+                                        }
+                                    }
+                                    client.write(Response::not_found());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn run(self) {
