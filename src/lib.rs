@@ -17,7 +17,7 @@ use std::thread;
 const SERVER: Token = Token(0);
 
 pub trait Handler : Send + 'static {
-    fn process(&mut self, r: Request) -> Response;
+    fn process(&mut self, request: Request, connection: &mut Connection);
     fn duplicate(&self) -> Box<Handler>;
 }
 
@@ -68,8 +68,7 @@ impl WebServer {
                                 Some(r) => {
                                     for &mut (ref regex, ref mut handler) in &mut handlers {
                                         if regex.is_match(&r.uri) {
-                                            let resp = handler.process(r);
-                                            client.write(resp);
+                                            handler.process(r, client);
                                             break;
                                         }
                                     }

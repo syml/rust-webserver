@@ -310,4 +310,8 @@ impl Connection {
     pub fn write(&mut self, response: Response) {
         self.socket.write(&response.as_bytes());
     }
+
+    pub fn write_str(&mut self, data: &str) {
+        self.socket.write(data.as_bytes());
+    }
 }
