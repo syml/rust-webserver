@@ -1,11 +1,10 @@
-extern crate threadpool;
 extern crate mio;
 extern crate regex;
 
 pub mod http;
+mod event_loop;
 
 use std::io::prelude::*;
-use threadpool::ThreadPool;
 use mio::*;
 use mio::tcp::*;
 use std::collections::HashMap;
@@ -13,6 +12,7 @@ use regex::Regex;
 use http::{Request, Response, Status, Connection};
 use std::sync::mpsc::*;
 use std::thread;
+use event_loop::*;
 
 const SERVER: Token = Token(0);
 
@@ -21,12 +21,56 @@ pub trait Handler : Send + 'static {
     fn duplicate(&self) -> Box<Handler>;
 }
 
-type HandlerRule = (Regex, Box<Handler>);
+struct HandlerRule(Regex, Box<Handler>);
 
 #[derive(Debug)]
 enum Msg {
     NewClient(usize, TcpStream),
     ClientReady(usize),
+}
+
+struct WebServerEventHandler {
+    clients: HashMap<usize, Connection>,
+    handlers: Vec<HandlerRule>,
+}
+impl WebServerEventHandler {
+    fn new(handlers: Vec<HandlerRule>) -> WebServerEventHandler {
+        return WebServerEventHandler {
+            clients: HashMap::new(),
+            handlers: handlers,
+        };
+    }
+}
+impl EventHandler for WebServerEventHandler {
+    fn new_client(&mut self, id: usize, client: TcpStream) {
+        self.clients.insert(id, Connection::new(client));
+    }
+    fn client_ready(&mut self, id: usize) {
+        match self.clients.get_mut(&id) {
+            None => panic!("client no {} can't be found in clients map!", id),
+            Some(ref mut client) => {
+                match client.read() {
+                    None => {}
+                    Some(r) => {
+                        for &mut HandlerRule(ref regex, ref mut handler) in &mut self.handlers {
+                            if regex.is_match(&r.uri) {
+                                handler.process(r, client);
+                                break;
+                            }
+                        }
+                        client.write(Response::not_found());
+                    }
+                }
+            }
+        }
+    }
+    fn duplicate(&self) -> Box<EventHandler> {
+        let mut handlers = Vec::new();
+        for &HandlerRule(ref r, ref h) in &self.handlers {
+            handlers.push(HandlerRule(r.clone(), h.duplicate()));
+        }
+        return Box::new(WebServerEventHandler::new(handlers));
+    }
 }
 
 pub struct WebServer {
@@ -47,92 +91,14 @@ impl WebServer {
     pub fn add_handler<T>(&mut self, pattern: &str, handler: T)
         where T: Handler
     {
-        self.handlers.push((Regex::new(&format!("^{}$", pattern)).unwrap(),
-                            Box::new(handler)));
-    }
-
-    fn process_clients(channel: Receiver<Msg>, mut handlers: Vec<HandlerRule>) {
-        let mut clients: HashMap<usize, Connection> = HashMap::new();
-        loop {
-            let msg = channel.recv().unwrap();
-            match msg {
-                Msg::NewClient(id, client) => {
-                    clients.insert(id, Connection::new(client));
-                }
-                Msg::ClientReady(id) => {
-                    match clients.get_mut(&id) {
-                        None => panic!("client no {} can't be found in clients map!", id),
-                        Some(ref mut client) => {
-                            match client.read() {
-                                None => {}
-                                Some(r) => {
-                                    for &mut (ref regex, ref mut handler) in &mut handlers {
-                                        if regex.is_match(&r.uri) {
-                                            handler.process(r, client);
-                                            break;
-                                        }
-                                    }
-                                    client.write(Response::not_found());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        self.handlers.push(HandlerRule(Regex::new(&format!("^{}$", pattern)).unwrap(),
+                                       Box::new(handler)));
     }
 
     pub fn run(self) {
-        let mut poll = Poll::new().unwrap();
-        let addr = self.host.parse().unwrap();
-        let server = TcpListener::bind(&addr).unwrap();
-        poll.register(&server, SERVER, Ready::readable(), PollOpt::edge()).unwrap();
-        let mut events = Events::with_capacity(1024);
-        let mut next_client: usize = 1;
-        let mut workers = Vec::new();
-        // Create worker threads.
-        for i in 0..self.num_workers {
-            let (tx, rx) = channel();
-            let mut handlers = Vec::new();
-            for &(ref r, ref h) in &self.handlers {
-                handlers.push((r.clone(), h.duplicate()));
-            }
-            let worker = thread::spawn(move || {
-                Self::process_clients(rx, handlers);
-            });
-            workers.push(tx);
-        }
-        loop {
-            let poll_error = poll.poll(&mut events, None);
-            match poll_error {
-                Err(e) => panic!("Error during poll(): {}", e),
-                Ok(_) => {}
-            }
-            for event in events.iter() {
-                match event.token() {
-                    SERVER => {
-                        let stream_ok = server.accept();
-                        match stream_ok {
-                            Ok((stream, _)) => {
-                                match poll.register(&stream,
-                                                    Token(next_client),
-                                                    Ready::readable(),
-                                                    PollOpt::edge()) {
-                                    Err(e) => panic!("Error during register(): {}", e),
-                                    _ => {}
-                                }
-                                workers[next_client % self.num_workers]
-                                    .send(Msg::NewClient(next_client, stream));
-                                next_client += 1;
-                            }
-                            Err(e) => panic!("Error during accept() : {}", e),
-                        }
-                    }
-                    Token(id) => {
-                        workers[id % self.num_workers].send(Msg::ClientReady(id));
-                    }
-                }
-            }
-        }
+        let event_loop = EventLoop::new("127.0.0.1:8080",
+                                        4,
+                                        Box::new(WebServerEventHandler::new(self.handlers)));
+        event_loop.run();
     }
 }

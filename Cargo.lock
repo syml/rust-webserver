@@ -4,7 +4,6 @@ version = "0.1.0"
 dependencies = [
  "mio 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex 0.1.77 (registry+https://github.com/rust-lang/crates.io-index)",
- "threadpool 0.1.0",
 ]
 
 [[package]]
@@ -160,10 +159,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "thread-id 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
-
-[[package]]
-name = "threadpool"
-version = "0.1.0"
 
 [[package]]
 name = "utf8-ranges"
