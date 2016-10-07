@@ -4,30 +4,18 @@ extern crate regex;
 pub mod http;
 mod event_loop;
 
-use std::io::prelude::*;
-use mio::*;
 use mio::tcp::*;
 use std::collections::HashMap;
 use regex::Regex;
-use http::{Request, Response, Status, Connection};
-use std::sync::mpsc::*;
-use std::thread;
+use http::{Request, Response, Connection};
 use event_loop::*;
 
-const SERVER: Token = Token(0);
-
 pub trait Handler : Send + 'static {
-    fn process(&mut self, request: Request, connection: &mut Connection);
+    fn process(&mut self, request: Request, response: &mut Response);
     fn duplicate(&self) -> Box<Handler>;
 }
 
 struct HandlerRule(Regex, Box<Handler>);
-
-#[derive(Debug)]
-enum Msg {
-    NewClient(usize, TcpStream),
-    ClientReady(usize),
-}
 
 struct WebServerEventHandler {
     clients: HashMap<usize, Connection>,
@@ -52,13 +40,14 @@ impl EventHandler for WebServerEventHandler {
                 match client.read() {
                     None => {}
                     Some(r) => {
+                        let resp = &mut Response::new(client);
                         for &mut HandlerRule(ref regex, ref mut handler) in &mut self.handlers {
                             if regex.is_match(&r.uri) {
-                                handler.process(r, client);
+                                handler.process(r, resp);
                                 break;
                             }
                         }
-                        client.write(Response::not_found());
+                        resp.not_found();
                     }
                 }
             }
@@ -96,8 +85,8 @@ impl WebServer {
     }
 
     pub fn run(self) {
-        let event_loop = EventLoop::new("127.0.0.1:8080",
-                                        4,
+        let event_loop = EventLoop::new(&self.host,
+                                        self.num_workers,
                                         Box::new(WebServerEventHandler::new(self.handlers)));
         event_loop.run();
     }

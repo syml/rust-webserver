@@ -26,29 +26,29 @@ impl Status {
     }
 }
 
-pub struct Response {
+pub struct Response<'a> {
     version: String,
     status: Status,
     headers: HashMap<String, String>,
     body: Vec<u8>,
+    stream: &'a mut Connection,
 }
 
-impl Response {
-    pub fn new() -> Response {
+impl<'a> Response<'a> {
+    pub fn new(connection: &'a mut Connection) -> Response<'a> {
         return Response {
             version: "HTTP/1.1".to_string(),
             status: Status::ok(),
             headers: HashMap::new(),
             body: Vec::new(),
+            stream: connection,
         };
     }
 
-    pub fn not_found() -> Response {
-        let mut r = Response::new();
-        r.set_status(Status::not_found());
-        r.set_header("Content-Type", "text/html");
-        r.set_body("<html><h1>404 Not found</h1></html>");
-        return r;
+    pub fn not_found(&mut self) {
+        self.set_status(Status::not_found());
+        self.set_header("Content-Type", "text/html");
+        self.set_body("<html><h1>404 Not found</h1></html>");
     }
 
     pub fn set_status(&mut self, status: Status) {
@@ -81,6 +81,21 @@ impl Response {
         b.extend_from_slice("\r\n".as_bytes());
         b.extend_from_slice(self.body.as_slice());
         return b;
+    }
+
+    pub fn write(&mut self, data: &[u8]) {
+        self.stream.write(data);
+
+    }
+    pub fn write_str(&mut self, data: &str) {
+        self.stream.write(data.as_bytes());
+    }
+
+    pub fn flush(&mut self) {
+        let bytes = self.as_bytes();
+        self.stream.write(&bytes);
+        self.headers.clear();
+        self.body.clear();
     }
 }
 
@@ -246,7 +261,7 @@ impl Connection {
                                                             self.state = State::ParseBody;
                                                         }
                                                     }
-                                                    Err(e) => {
+                                                    _ => {
                                                         println!("Invalid Content-Length header \
                                                                   value: {}",
                                                                  s);
@@ -303,15 +318,11 @@ impl Connection {
     }
 
     pub fn read(&mut self) -> Option<Request> {
-        self.socket.read_to_end(&mut self.data);
+        let _ = self.socket.read_to_end(&mut self.data);
         return self.parse_request();
     }
 
-    pub fn write(&mut self, response: Response) {
-        self.socket.write(&response.as_bytes());
-    }
-
-    pub fn write_str(&mut self, data: &str) {
-        self.socket.write(data.as_bytes());
+    pub fn write(&mut self, data: &[u8]) {
+        let _ = self.socket.write(data);
     }
 }
