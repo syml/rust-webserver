@@ -49,6 +49,7 @@ impl<'a> Response<'a> {
         self.set_status(Status::not_found());
         self.set_header("Content-Type", "text/html");
         self.set_body("<html><h1>404 Not found</h1></html>");
+        self.flush();
     }
 
     pub fn set_status(&mut self, status: Status) {

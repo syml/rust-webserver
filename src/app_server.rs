@@ -1,3 +1,4 @@
+use mio::*;
 use mio::tcp::*;
 use std::collections::HashMap;
 use event_loop::*;
@@ -25,26 +26,31 @@ impl AppWithStream {
 
 struct AppEventHandler {
     app: Box<App>,
-    clients: HashMap<usize, AppWithStream>,
+    conns: HashMap<usize, AppWithStream>,
 }
 impl AppEventHandler {
     fn new(app: Box<App>) -> AppEventHandler {
         return AppEventHandler {
             app: app,
-            clients: HashMap::new(),
+            conns: HashMap::new(),
         };
     }
 }
 impl EventHandler for AppEventHandler {
-    fn new_client(&mut self, id: usize, stream: TcpStream) {
-        self.clients.insert(id, AppWithStream::new(self.app.duplicate(), stream));
+    fn new_conn(&mut self, id: usize, stream: TcpStream) {
+        self.conns.insert(id, AppWithStream::new(self.app.duplicate(), stream));
     }
-    fn client_ready(&mut self, id: usize) {
-        match self.clients.get_mut(&id) {
-            None => panic!("client no {} can't be found in clients map!", id),
-            Some(ref mut client) => {
-                client.handle();
+    fn conn_event(&mut self, id: usize, event: Ready) {
+        if event.is_readable() {
+            match self.conns.get_mut(&id) {
+                None => panic!("conn no {} can't be found in conns map!", id),
+                Some(ref mut conn) => {
+                    conn.handle();
+                }
             }
+        }
+        if event.is_error() || event.is_hup() {
+            self.conns.remove(&id);
         }
     }
     fn duplicate(&self) -> Box<EventHandler> {

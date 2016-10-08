@@ -8,15 +8,15 @@ use std::str::FromStr;
 const SERVER: Token = Token(0);
 
 pub trait EventHandler : Send + 'static {
-    fn new_client(&mut self, id: usize, client: TcpStream);
-    fn client_ready(&mut self, id: usize);
+    fn new_conn(&mut self, id: usize, conn: TcpStream);
+    fn conn_event(&mut self, id: usize, event: Ready);
     fn duplicate(&self) -> Box<EventHandler>;
 }
 
 #[derive(Debug)]
 enum Msg {
-    NewClient(usize, TcpStream),
-    ClientReady(usize),
+    NewConn(usize, TcpStream),
+    ConnEvent(usize, Ready),
 }
 
 pub struct EventLoop {
@@ -38,11 +38,11 @@ impl EventLoop {
         loop {
             let msg = channel.recv().unwrap();
             match msg {
-                Msg::NewClient(id, client) => {
-                    event_handler.new_client(id, client);
+                Msg::NewConn(id, conn) => {
+                    event_handler.new_conn(id, conn);
                 }
-                Msg::ClientReady(id) => {
-                    event_handler.client_ready(id);
+                Msg::ConnEvent(id, event) => {
+                    event_handler.conn_event(id, event);
                 }
             }
         }
@@ -53,7 +53,7 @@ impl EventLoop {
         let server = TcpListener::bind(&SocketAddr::from_str(&self.host).unwrap()).unwrap();
         poll.register(&server, SERVER, Ready::readable(), PollOpt::edge()).unwrap();
         let mut events = Events::with_capacity(1024);
-        let mut next_client: usize = 1;
+        let mut next_conn: usize = 1;
         let mut workers = Vec::new();
         // Create worker threads.
         for _ in 0..self.num_workers {
@@ -75,22 +75,25 @@ impl EventLoop {
                         match server.accept() {
                             Ok((stream, _)) => {
                                 match poll.register(&stream,
-                                                    Token(next_client),
-                                                    Ready::readable(),
+                                                    Token(next_conn),
+                                                    Ready::all(),
                                                     PollOpt::edge()) {
                                     Err(e) => panic!("Error during register(): {}", e),
-                                    _ => {}
+                                    _ => {
+                                        workers[next_conn % self.num_workers]
+                                            .send(Msg::NewConn(next_conn, stream))
+                                            .unwrap();
+                                        next_conn += 1;
+                                    }
                                 }
-                                workers[next_client % self.num_workers]
-                                    .send(Msg::NewClient(next_client, stream))
-                                    .unwrap();
-                                next_client += 1;
                             }
                             Err(e) => panic!("Error during accept() : {}", e),
                         }
                     }
                     Token(id) => {
-                        workers[id % self.num_workers].send(Msg::ClientReady(id)).unwrap();
+                        workers[id % self.num_workers]
+                            .send(Msg::ConnEvent(id, event.kind()))
+                            .unwrap();
                     }
                 }
             }
