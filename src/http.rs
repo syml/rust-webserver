@@ -31,17 +31,17 @@ pub struct Response<'a> {
     status: Status,
     headers: HashMap<String, String>,
     body: Vec<u8>,
-    stream: &'a mut Connection,
+    stream: &'a mut TcpStream,
 }
 
 impl<'a> Response<'a> {
-    pub fn new(connection: &'a mut Connection) -> Response<'a> {
+    pub fn new(stream: &'a mut TcpStream) -> Response<'a> {
         return Response {
             version: "HTTP/1.1".to_string(),
             status: Status::ok(),
             headers: HashMap::new(),
             body: Vec::new(),
-            stream: connection,
+            stream: stream,
         };
     }
 
@@ -84,16 +84,16 @@ impl<'a> Response<'a> {
     }
 
     pub fn write(&mut self, data: &[u8]) {
-        self.stream.write(data);
+        let _ = self.stream.write(data);
 
     }
     pub fn write_str(&mut self, data: &str) {
-        self.stream.write(data.as_bytes());
+        let _ = self.stream.write(data.as_bytes());
     }
 
     pub fn flush(&mut self) {
         let bytes = self.as_bytes();
-        self.stream.write(&bytes);
+        let _ = self.stream.write(&bytes);
         self.headers.clear();
         self.body.clear();
     }
@@ -155,8 +155,7 @@ enum State {
     Error,
 }
 
-pub struct Connection {
-    socket: TcpStream,
+pub struct RequestBuilder {
     data: Vec<u8>,
     parsed: usize,
     body_size: usize,
@@ -164,11 +163,10 @@ pub struct Connection {
     state: State,
 }
 
-impl Connection {
-    pub fn new(socket: TcpStream) -> Connection {
-        return Connection {
+impl RequestBuilder {
+    pub fn new() -> RequestBuilder {
+        return RequestBuilder {
             state: State::ParseRequestLine,
-            socket: socket,
             data: Vec::new(),
             parsed: 0,
             body_size: 0,
@@ -317,12 +315,8 @@ impl Connection {
         }
     }
 
-    pub fn read(&mut self) -> Option<Request> {
-        let _ = self.socket.read_to_end(&mut self.data);
+    pub fn read(&mut self, data: &[u8]) -> Option<Request> {
+        self.data.extend_from_slice(data);
         return self.parse_request();
-    }
-
-    pub fn write(&mut self, data: &[u8]) {
-        let _ = self.socket.write(data);
     }
 }

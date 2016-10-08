@@ -3,12 +3,13 @@ extern crate regex;
 
 pub mod http;
 mod event_loop;
+mod app_server;
 
+use std::io::prelude::*;
 use mio::tcp::*;
-use std::collections::HashMap;
 use regex::Regex;
-use http::{Request, Response, Connection};
-use event_loop::*;
+use http::{Request, Response, RequestBuilder};
+use app_server::*;
 
 pub trait Handler : Send + 'static {
     fn process(&mut self, request: Request, response: &mut Response);
@@ -17,48 +18,42 @@ pub trait Handler : Send + 'static {
 
 struct HandlerRule(Regex, Box<Handler>);
 
-struct WebServerEventHandler {
-    clients: HashMap<usize, Connection>,
+struct HandlerApp {
     handlers: Vec<HandlerRule>,
+    builder: RequestBuilder,
 }
-impl WebServerEventHandler {
-    fn new(handlers: Vec<HandlerRule>) -> WebServerEventHandler {
-        return WebServerEventHandler {
-            clients: HashMap::new(),
+impl HandlerApp {
+    fn new(handlers: Vec<HandlerRule>) -> HandlerApp {
+        return HandlerApp {
             handlers: handlers,
+            builder: RequestBuilder::new(),
         };
     }
 }
-impl EventHandler for WebServerEventHandler {
-    fn new_client(&mut self, id: usize, client: TcpStream) {
-        self.clients.insert(id, Connection::new(client));
-    }
-    fn client_ready(&mut self, id: usize) {
-        match self.clients.get_mut(&id) {
-            None => panic!("client no {} can't be found in clients map!", id),
-            Some(ref mut client) => {
-                match client.read() {
-                    None => {}
-                    Some(r) => {
-                        let resp = &mut Response::new(client);
-                        for &mut HandlerRule(ref regex, ref mut handler) in &mut self.handlers {
-                            if regex.is_match(&r.uri) {
-                                handler.process(r, resp);
-                                break;
-                            }
-                        }
-                        resp.not_found();
-                    }
+impl App for HandlerApp {
+    fn handle(&mut self, stream: &mut TcpStream) {
+        let mut data = Vec::new();
+        let _ = stream.read_to_end(&mut data);
+        if let Some(r) = self.builder.read(&data) {
+            let resp = &mut Response::new(stream);
+            for &mut HandlerRule(ref regex, ref mut handler) in &mut self.handlers {
+                if regex.is_match(&r.uri) {
+                    handler.process(r, resp);
+                    break;
                 }
             }
+            resp.not_found();
         }
     }
-    fn duplicate(&self) -> Box<EventHandler> {
+    fn duplicate(&self) -> Box<App> {
         let mut handlers = Vec::new();
         for &HandlerRule(ref r, ref h) in &self.handlers {
             handlers.push(HandlerRule(r.clone(), h.duplicate()));
         }
-        return Box::new(WebServerEventHandler::new(handlers));
+        Box::new(HandlerApp {
+            handlers: handlers,
+            builder: RequestBuilder::new(),
+        })
     }
 }
 
@@ -85,9 +80,9 @@ impl WebServer {
     }
 
     pub fn run(self) {
-        let event_loop = EventLoop::new(&self.host,
+        let app_server = AppServer::new(&self.host,
                                         self.num_workers,
-                                        Box::new(WebServerEventHandler::new(self.handlers)));
-        event_loop.run();
+                                        Box::new(HandlerApp::new(self.handlers)));
+        app_server.run();
     }
 }

@@ -40,7 +40,7 @@ impl Handler for LongHandler {
         resp.set_header("Content-Length", &format!("{}", 100000 + 38));
         resp.flush();
         for _ in 0..10000 {
-            resp.write_str("12345<br/>");
+            resp.write_str("sunny<3<br/>");
             sleep(Duration::from_millis(100));
         }
     }
