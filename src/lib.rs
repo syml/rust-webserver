@@ -42,7 +42,7 @@ impl App for HandlerApp {
                     break;
                 }
             }
-            resp.not_found();
+            resp.not_found().send();
         }
     }
     fn duplicate(&self) -> Box<App> {

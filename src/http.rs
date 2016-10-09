@@ -45,28 +45,38 @@ impl<'a> Response<'a> {
         };
     }
 
-    pub fn not_found(&mut self) {
-        self.set_status(Status::not_found());
-        self.set_header("Content-Type", "text/html");
-        self.set_body("<html><h1>404 Not found</h1></html>");
-        self.flush();
+    pub fn not_found(&mut self) -> &mut Response<'a> {
+        self.set_status(Status::not_found())
+            .set_header("Content-Type", "text/html")
+            .set_body_str("<html><h1>404 Not found</h1></html>")
     }
 
-    pub fn set_status(&mut self, status: Status) {
+    pub fn set_status(&mut self, status: Status) -> &mut Response<'a> {
         self.status = status;
+        self
     }
-    pub fn set_header(&mut self, header_name: &str, value: &str) {
+    pub fn set_header(&mut self, header_name: &str, value: &str) -> &mut Response<'a> {
         self.headers.insert(header_name.to_string(), value.to_string());
+        self
     }
 
-    pub fn set_body_bytes(&mut self, body: &[u8]) {
+    pub fn set_headers(&mut self, headers: &[(&str, &str)]) -> &mut Response<'a> {
+        for &(name, value) in headers {
+            self.set_header(name, value);
+        }
+        self
+    }
+
+    pub fn set_body(&mut self, body: &[u8]) -> &mut Response<'a> {
         self.body.extend_from_slice(body);
         let value = self.body.len().to_string();
         self.set_header("Content-Length", &value);
+        self
     }
 
-    pub fn set_body(&mut self, body: &str) {
-        self.set_body_bytes(body.as_bytes());
+    pub fn set_body_str(&mut self, body: &str) -> &mut Response<'a> {
+        self.set_body(body.as_bytes());
+        self
     }
 
     fn as_bytes(&self) -> Vec<u8> {
@@ -84,15 +94,15 @@ impl<'a> Response<'a> {
         return b;
     }
 
-    pub fn write(&mut self, data: &[u8]) {
+    pub fn send_data(&mut self, data: &[u8]) {
         let _ = self.stream.write(data);
 
     }
-    pub fn write_str(&mut self, data: &str) {
+    pub fn send_str(&mut self, data: &str) {
         let _ = self.stream.write(data.as_bytes());
     }
 
-    pub fn flush(&mut self) {
+    pub fn send(&mut self) {
         let bytes = self.as_bytes();
         let _ = self.stream.write(&bytes);
         self.headers.clear();
