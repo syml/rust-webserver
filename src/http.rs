@@ -60,6 +60,11 @@ impl<'a> Response<'a> {
         self
     }
 
+    pub fn set_length(&mut self, length: u64) -> &mut Response<'a> {
+        self.set_header("Content-Length", &format!("{}", length));
+        self
+    }
+
     pub fn set_headers(&mut self, headers: &[(&str, &str)]) -> &mut Response<'a> {
         for &(name, value) in headers {
             self.set_header(name, value);

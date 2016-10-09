@@ -4,6 +4,7 @@ extern crate regex;
 pub mod http;
 mod event_loop;
 mod app_server;
+pub mod http_file;
 
 use std::io::prelude::*;
 use mio::tcp::*;

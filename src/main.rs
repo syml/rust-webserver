@@ -4,30 +4,47 @@ use webserver::{WebServer, Handler};
 use webserver::http::{Request, Response, Status};
 use std::thread::*;
 use std::time::*;
+use webserver::http_file::*;
 
-struct MainHandler;
-impl Handler for MainHandler {
-    fn process(&mut self, r: Request, resp: &mut Response) {
-        resp.set_status(Status::ok())
-            .set_header("Content-Type", "text/html")
-            .set_body_str(&format!("<h1>Sylvain Server</h1>You requested: {}", r.uri))
-            .send();
+struct FileSystemHandler {
+    path: String,
+    fs: FileSystem,
+}
+impl FileSystemHandler {
+    fn new(path: &str) -> FileSystemHandler {
+        FileSystemHandler {
+            path: path.to_string(),
+            fs: FileSystem::new(path),
+        }
+    }
+}
+impl Handler for FileSystemHandler {
+    fn process(&mut self, req: Request, resp: &mut Response) {
+        self.fs.serve(&req.uri, resp);
     }
     fn duplicate(&self) -> Box<Handler> {
-        return Box::new(MainHandler);
+        return Box::new(FileSystemHandler::new(&self.path));
     }
 }
 
-struct SecretHandler;
-impl Handler for SecretHandler {
-    fn process(&mut self, r: Request, resp: &mut Response) {
-        resp.set_status(Status::ok())
-            .set_header("Content-Type", "text/html")
-            .set_body_str(&format!("<h1>Secret page!!</h1>This is very {}", r.uri))
-            .send();
+struct FileHandler {
+    path: String,
+    fs: FileSystem,
+}
+impl FileHandler {
+    fn new(path: &str) -> FileHandler {
+        FileHandler {
+            path: path.to_string(),
+            fs: FileSystem::new(path),
+        }
+    }
+}
+impl Handler for FileHandler {
+    fn process(&mut self, _: Request, resp: &mut Response) {
+        self.fs.serve("", resp);
     }
     fn duplicate(&self) -> Box<Handler> {
-        return Box::new(SecretHandler);
+        return Box::new(FileHandler::new(&self.path));
     }
 }
 
@@ -51,8 +68,8 @@ impl Handler for LongHandler {
 
 fn main() {
     let mut server = WebServer::new("127.0.0.1:8080", 4);
-    server.add_handler("/secret", SecretHandler);
-    server.add_handler("/", MainHandler);
     server.add_handler("/long", LongHandler);
+    server.add_handler("/", FileHandler::new("http/index.html"));
+    server.add_handler("/.*", FileSystemHandler::new("http"));
     server.run();
 }
