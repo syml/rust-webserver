@@ -1,52 +1,11 @@
 extern crate webserver;
 
-use webserver::{WebServer, Handler};
-use webserver::http::{Request, Response, Status};
 use std::thread::*;
 use std::time::*;
-use webserver::http_file::*;
-
-struct FileSystemHandler {
-    path: String,
-    fs: FileSystem,
-}
-impl FileSystemHandler {
-    fn new(path: &str) -> FileSystemHandler {
-        FileSystemHandler {
-            path: path.to_string(),
-            fs: FileSystem::new(path),
-        }
-    }
-}
-impl Handler for FileSystemHandler {
-    fn process(&mut self, req: Request, resp: &mut Response) {
-        self.fs.serve(&req.uri, resp);
-    }
-    fn duplicate(&self) -> Box<Handler> {
-        return Box::new(FileSystemHandler::new(&self.path));
-    }
-}
-
-struct FileHandler {
-    path: String,
-    fs: FileSystem,
-}
-impl FileHandler {
-    fn new(path: &str) -> FileHandler {
-        FileHandler {
-            path: path.to_string(),
-            fs: FileSystem::new(path),
-        }
-    }
-}
-impl Handler for FileHandler {
-    fn process(&mut self, _: Request, resp: &mut Response) {
-        self.fs.serve("", resp);
-    }
-    fn duplicate(&self) -> Box<Handler> {
-        return Box::new(FileHandler::new(&self.path));
-    }
-}
+use webserver::handlers::*;
+use webserver::handler_lib::*;
+use webserver::http::*;
+use webserver::*;
 
 struct LongHandler;
 impl Handler for LongHandler {
