@@ -122,21 +122,23 @@ enum Method {
 
 #[derive(Debug, Clone)]
 pub struct Request {
+    method: Method,
+    pub uri: String,
+    params: HashMap<String, String>,
     version: String,
     headers: HashMap<String, String>,
     body: Vec<u8>,
-    pub uri: String,
-    method: Method,
 }
 
 impl Request {
     fn new() -> Request {
         return Request {
+            method: Method::Get,
+            uri: String::new(),
+            params: HashMap::new(),
             version: String::new(),
             headers: HashMap::new(),
             body: Vec::new(),
-            uri: String::new(),
-            method: Method::Get,
         };
     }
     fn set_version(&mut self, version: &str) {
@@ -144,6 +146,27 @@ impl Request {
     }
     fn set_uri(&mut self, uri: &str) {
         self.uri = uri.to_string();
+    }
+    fn set_param(&mut self, name: &str, value: &str) {
+        self.params.insert(name.to_string(), value.to_string());
+    }
+    fn parse_uri(&mut self, uri: &str) {
+        match uri.find('?') {
+            Some(idx) => {
+                let params_str = &uri[idx + 1..];
+                let base_uri = &uri[..idx];
+                self.set_uri(base_uri);
+                for param in params_str.split('&') {
+                    let parts: Vec<&str> = param.split('=').collect();
+                    if parts.len() == 2 {
+                        self.set_param(parts[0], parts[1]);
+                    }
+                }
+            }
+            None => {
+                self.set_uri(uri);
+            }
+        }
     }
     fn set_method(&mut self, method: Method) {
         self.method = method;
@@ -244,7 +267,7 @@ impl RequestBuilder {
                                             return None;
                                         }
                                     }
-                                    self.request.set_uri(parts[1]);
+                                    self.request.parse_uri(parts[1]);
                                     self.request.set_version(parts[2]);
                                     self.state = State::ParseHeaders;
                                 }

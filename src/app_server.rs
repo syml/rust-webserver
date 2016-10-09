@@ -22,6 +22,9 @@ impl AppWithStream {
     fn handle(&mut self) {
         self.app.handle(&mut self.stream);
     }
+    fn shutdown(&self) {
+        let _ = self.stream.shutdown(Shutdown::Both);
+    }
 }
 
 struct AppEventHandler {
@@ -43,13 +46,25 @@ impl EventHandler for AppEventHandler {
     fn conn_event(&mut self, id: usize, event: Ready) {
         if event.is_readable() {
             match self.conns.get_mut(&id) {
-                None => panic!("conn no {} can't be found in conns map!", id),
+                None => {
+                    println!("WARNING: conn no {} can't be found in conns map for read event!",
+                             id)
+                }
                 Some(ref mut conn) => {
                     conn.handle();
                 }
             }
         }
         if event.is_error() || event.is_hup() {
+            match self.conns.get_mut(&id) {
+                None => {
+                    println!("WARNING: conn no {} can't be found in conns map for shutdown event!",
+                             id)
+                }
+                Some(ref mut conn) => {
+                    conn.shutdown();
+                }
+            }
             self.conns.remove(&id);
         }
     }

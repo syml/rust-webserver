@@ -14,12 +14,12 @@ impl FileSystem {
         full_path.push_str(uri);
         if let Ok(m) = metadata(&full_path) {
             if m.is_file() {
-                resp.set_length(m.len());
                 if let Ok(ref mut f) = File::open(&full_path) {
-                    resp.set_status(Status::ok())
-                        .set_header("Content-Type", "text/html")
-                        .send();
-                    let buf: &mut [u8] = &mut [0; 1024];
+                    resp.set_status(Status::ok());
+                    resp.set_header("Content-Type", Self::get_mime(&full_path));
+                    resp.set_length(m.len());
+                    resp.send();
+                    let buf: &mut [u8] = &mut [0; 1024 * 1024];
                     while let Ok(n) = f.read(buf) {
                         if n > 0 {
                             resp.send_data(&buf[0..n]);
@@ -31,6 +31,26 @@ impl FileSystem {
                 }
             }
         }
+        println!("Not found: {}", full_path);
         resp.set_not_found().send();
+    }
+
+    fn get_mime(path: &str) -> &str {
+        if let Some(idx) = path.rfind('.') {
+            let ext = &path[idx + 1..];
+            match ext {
+                "html" => "text/html",
+                "css" => "text/css",
+                "js" => "text/javascript",
+                "jpg" | "jpeg" => "image/jpeg",
+                "png" => "image/png",
+                "svg" => "image/svg+xml",
+                "woff" | "woff2" => "application/x-font-woff",
+                _ => "application/octet-stream",
+            }
+        } else {
+            // Default to binary data.
+            "application/octet-stream"
+        }
     }
 }
