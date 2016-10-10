@@ -37,7 +37,7 @@ impl App for HandlerApp {
             for &mut HandlerRule(ref regex, ref mut handler) in &mut self.handlers {
                 if regex.is_match(&r.uri) {
                     handler.process(r, resp);
-                    break;
+                    return;
                 }
             }
             resp.set_not_found().send();

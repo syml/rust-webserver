@@ -76,7 +76,7 @@ impl EventLoop {
                             Ok((stream, _)) => {
                                 match poll.register(&stream,
                                                     Token(next_conn),
-                                                    Ready::all(),
+                                                    Ready::readable(),
                                                     PollOpt::edge()) {
                                     Err(e) => panic!("Error during register(): {}", e),
                                     Ok(_) => {
