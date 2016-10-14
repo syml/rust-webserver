@@ -80,6 +80,8 @@ impl EventLoop {
                                                     PollOpt::edge()) {
                                     Err(e) => panic!("Error during register(): {}", e),
                                     Ok(_) => {
+                                        println!("New connection on worker {} ",
+                                                 next_conn % self.num_workers);
                                         workers[next_conn % self.num_workers]
                                             .send(Msg::NewConn(next_conn, stream))
                                             .unwrap();

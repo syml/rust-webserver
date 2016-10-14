@@ -1,3 +1,4 @@
+use std::io::prelude::*;
 use mio::*;
 use mio::tcp::*;
 use std::collections::HashMap;
@@ -25,6 +26,10 @@ impl AppWithStream {
     fn shutdown(&self) {
         let _ = self.stream.shutdown(Shutdown::Both);
     }
+    fn flush(&mut self) {
+        let mut buf = Vec::new();
+        let _ = self.stream.read_to_end(&mut buf);
+    }
 }
 
 struct AppEventHandler {
@@ -41,9 +46,32 @@ impl AppEventHandler {
 }
 impl EventHandler for AppEventHandler {
     fn new_conn(&mut self, id: usize, stream: TcpStream) {
+        println!("Got new connection {}", id);
         self.conns.insert(id, AppWithStream::new(self.app.duplicate(), stream));
     }
     fn conn_event(&mut self, id: usize, event: Ready) {
+        println!("Handling event!");
+        if event.is_error() || event.is_hup() {
+            if event.is_error() {
+                println!("Error event on conn {}", id);
+            } else {
+                println!("Hangup event on conn {}", id)
+            }
+            match self.conns.remove(&id) {
+                None => {
+                    println!("WARNING: conn no {} can't be found in conns map for shutdown event!",
+                             id)
+                }
+                Some(mut conn) => {
+                    if event.is_readable() {
+                        conn.flush();
+                    }
+                    conn.shutdown();
+                    self.conns.remove(&id);
+                    return;
+                }
+            }
+        }
         if event.is_readable() {
             match self.conns.get_mut(&id) {
                 None => {
@@ -51,21 +79,10 @@ impl EventHandler for AppEventHandler {
                              id)
                 }
                 Some(ref mut conn) => {
+                    println!("Handling connection {}", id);
                     conn.handle();
                 }
             }
-        }
-        if event.is_error() || event.is_hup() {
-            match self.conns.get_mut(&id) {
-                None => {
-                    println!("WARNING: conn no {} can't be found in conns map for shutdown event!",
-                             id)
-                }
-                Some(ref mut conn) => {
-                    conn.shutdown();
-                }
-            }
-            self.conns.remove(&id);
         }
     }
     fn duplicate(&self) -> Box<EventHandler> {
