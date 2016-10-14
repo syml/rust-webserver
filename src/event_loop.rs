@@ -65,6 +65,7 @@ impl EventLoop {
             workers.push(tx);
         }
         loop {
+            println!("Polling...");
             match poll.poll(&mut events, None) {
                 Err(e) => panic!("Error during poll(): {}", e),
                 Ok(_) => {}
@@ -72,8 +73,10 @@ impl EventLoop {
             for event in events.iter() {
                 match event.token() {
                     SERVER => {
+                        println!("Accepting..");
                         match server.accept() {
                             Ok((stream, _)) => {
+                                println!("Registering new connection...");
                                 match poll.register(&stream,
                                                     Token(next_conn),
                                                     Ready::readable(),
@@ -93,6 +96,9 @@ impl EventLoop {
                         }
                     }
                     Token(id) => {
+                        println!("Sending event on conn {} to worker {}",
+                                 id,
+                                 id % self.num_workers);
                         workers[id % self.num_workers]
                             .send(Msg::ConnEvent(id, event.kind()))
                             .unwrap();
