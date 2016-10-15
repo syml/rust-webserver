@@ -19,8 +19,10 @@ impl FileSystem {
                     resp.set_header("Content-Type", Self::get_mime(&full_path));
                     resp.set_length(m.len());
                     resp.send();
-                    let buf: &mut [u8] = &mut [0; 1024 * 1024];
-                    while let Ok(n) = f.read(buf) {
+                    let buf_size = 10 * 1024 * 1024; // 10MB;
+                    let mut buf: Vec<u8> = Vec::with_capacity(buf_size);
+                    buf.resize(buf_size, 0);
+                    while let Ok(n) = f.read(&mut buf) {
                         if n > 0 {
                             resp.send_data(&buf[0..n]);
                         } else {
